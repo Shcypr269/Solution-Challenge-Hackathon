@@ -1,0 +1,14 @@
+==================================================
+  LaDe-D Dataset Summary Statistics
+  Cainiao-AI (KDD 2024)
+==================================================
+
+  total_deliveries              : 421848
+  unique_couriers               : 1812
+  cities                        : 3
+  date_range_days               : 83
+  avg_duration_mins             : 100.9
+  median_duration_mins          : 86.0
+  avg_distance_km               : 1.426
+  median_distance_km            : 1.126
+  rush_hour_pct                 : 29.6
