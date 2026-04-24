@@ -14,3 +14,7 @@ Dockerfile
 docker-compose.yml
 *.md
 Makefile
+
+# Testing
+backend/tests/
+tests/

@@ -10,10 +10,6 @@ def log_attempt_failed(retry_state):
     )
 
 def circuit_breaker(max_attempts=3, min_wait=1, max_wait=10):
-    """
-    Decorator that applies exponential backoff for network or API failures.
-    Can be placed around external calls like Gemini or Google Maps.
-    """
     return retry(
         stop=stop_after_attempt(max_attempts),
         wait=wait_exponential(multiplier=min_wait, max=max_wait),

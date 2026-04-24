@@ -6,10 +6,6 @@ predictor = DelayPredictor()
 engineer = FeatureEngineer()
 
 async def predict_shipment_delay(shipment_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Business logic layer for delay prediction.
-    Takes raw shipment data, engineers features, runs ML model.
-    """
     features = engineer.create_features(shipment_data)
     is_delayed, confidence = predictor.predict_delay_risk(features)
     

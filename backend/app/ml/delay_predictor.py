@@ -8,7 +8,6 @@ class DelayPredictor:
         self._try_load(model_path)
     
     def _try_load(self, model_path: str = None):
-        """Try multiple paths to find the model artifact."""
         candidates = [
             model_path,
             "models/delay_predictor_v2.joblib",

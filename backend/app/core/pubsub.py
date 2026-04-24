@@ -12,9 +12,7 @@ else:
 topic_path = publisher.topic_path(settings.gcp_project_id, "disruption_events")
 
 async def publish_disruption_event(payload: dict):
-    """
-    Publish an event to Pub/Sub to trigger async processing.
-    """
+
     import json
     data = json.dumps(payload).encode("utf-8")
     
