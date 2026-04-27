@@ -118,38 +118,77 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Key Metrics
+# Key Metrics — live from ML engine
+import requests, os, sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+ML_URL = os.environ.get("ML_ENGINE_URL", "https://logitrackai.onrender.com")
+
+@st.cache_data(ttl=300)
+def fetch_live_metrics():
+    metrics = {"accuracy": 90.5, "fleet_risk": 0, "anomalies": 0, "co2_saved": 0, "congestion": "N/A"}
+    try:
+        # 1. Run batch anomaly on 30 shipments
+        r = requests.post(f"{ML_URL}/api/v1/ml/anomaly-detect-batch", json={"fleet_size": 30}, timeout=15)
+        if r.ok:
+            data = r.json()
+            metrics["anomalies"] = data.get("total_anomalies", 0)
+            metrics["fleet_risk"] = round(data.get("anomaly_rate", 0) * 100, 1)
+
+        # 2. Get CO2 savings from optimizer (1200km, 500kg, green priority)
+        r2 = requests.post(f"{ML_URL}/api/v1/ml/optimize-transport", json={
+            "distance_km": 1200, "weight_kg": 500, "deadline_hours": 48,
+            "priority": "green", "weather_severity": 0.2
+        }, timeout=15)
+        if r2.ok:
+            data2 = r2.json()
+            metrics["co2_saved"] = data2.get("savings", {}).get("co2_saving_kg", 0)
+
+        # 3. Run a what-if to get disruption impact
+        r3 = requests.post(f"{ML_URL}/api/v1/ml/whatif", json={
+            "disruption_type": "weather", "affected_region": "north",
+            "severity": 0.6, "fleet_size": 20
+        }, timeout=15)
+        if r3.ok:
+            data3 = r3.json()
+            metrics["disruptions_handled"] = data3.get("summary", {}).get("newly_at_risk_count", 0)
+    except Exception:
+        pass
+    return metrics
+
+live = fetch_live_metrics()
+
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    st.markdown("""
+    st.markdown(f"""
     <div class="metric-card">
-        <h2>90.5%</h2>
+        <h2>{live['accuracy']}%</h2>
         <p>Model Accuracy</p>
     </div>
     """, unsafe_allow_html=True)
 
 with col2:
-    st.markdown("""
+    st.markdown(f"""
     <div class="metric-card metric-green">
-        <h2>₹2.4L</h2>
-        <p>Penalties Prevented</p>
+        <h2>{live['fleet_risk']}%</h2>
+        <p>Fleet Anomaly Rate</p>
     </div>
     """, unsafe_allow_html=True)
 
 with col3:
-    st.markdown("""
+    st.markdown(f"""
     <div class="metric-card metric-orange">
-        <h2>147</h2>
-        <p>Disruptions Handled</p>
+        <h2>{live['anomalies']}</h2>
+        <p>Anomalies Detected</p>
     </div>
     """, unsafe_allow_html=True)
 
 with col4:
-    st.markdown("""
+    st.markdown(f"""
     <div class="metric-card metric-blue">
-        <h2>340 kg</h2>
-        <p>CO₂ Emissions Saved</p>
+        <h2>{live['co2_saved']} kg</h2>
+        <p>CO₂ Saved (Optimizer)</p>
     </div>
     """, unsafe_allow_html=True)
 
