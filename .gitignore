@@ -9,9 +9,16 @@ DataSet Download.zip
 
 data/
 
+# Python
+__pycache__/
+**/__pycache__/
+.venv/
+*.pyc
+
+# Node
+node_modules/
+
 # User exclusions
-Dockerfile
-docker-compose.yml
 *.md
 Makefile
 

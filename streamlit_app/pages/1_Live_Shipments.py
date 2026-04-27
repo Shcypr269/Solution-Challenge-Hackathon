@@ -9,33 +9,68 @@ st.set_page_config(page_title="Live Shipments", page_icon="🗺️", layout="wid
 st.markdown("## 🗺️ Live Shipment Tracking")
 st.markdown("Real-time view of active shipments across India with ML-predicted risk levels.")
 
-# Simulated shipment data representing India logistics
-shipments = pd.DataFrame([
-    {"id": "SHP-001", "origin": "Mumbai", "destination": "Delhi", "lat": 23.26, "lng": 77.41, "status": "IN_TRANSIT", 
-     "partner": "Delhivery", "vehicle": "Truck", "weather": "Clear", "distance_km": 1400, "weight_kg": 25.0,
-     "delay_risk": 0.82, "risk_level": "HIGH", "eta": "Apr 22, 10:00 AM"},
-    {"id": "SHP-002", "origin": "Bangalore", "destination": "Chennai", "lat": 12.97, "lng": 77.59, "status": "IN_TRANSIT",
-     "partner": "Shadowfax", "vehicle": "EV Van", "weather": "Rainy", "distance_km": 350, "weight_kg": 8.0,
-     "delay_risk": 0.91, "risk_level": "HIGH", "eta": "Apr 21, 6:00 PM"},
-    {"id": "SHP-003", "origin": "Kolkata", "destination": "Patna", "lat": 23.81, "lng": 86.44, "status": "IN_TRANSIT",
-     "partner": "XpressBees", "vehicle": "Bike", "weather": "Clear", "distance_km": 580, "weight_kg": 3.0,
-     "delay_risk": 0.15, "risk_level": "LOW", "eta": "Apr 21, 2:00 PM"},
-    {"id": "SHP-004", "origin": "Jaipur", "destination": "Lucknow", "lat": 27.02, "lng": 76.36, "status": "DELAYED",
-     "partner": "DHL", "vehicle": "Truck", "weather": "Stormy", "distance_km": 560, "weight_kg": 45.0,
-     "delay_risk": 0.97, "risk_level": "CRITICAL", "eta": "Apr 22, 8:00 PM"},
-    {"id": "SHP-005", "origin": "Hyderabad", "destination": "Vizag", "lat": 16.50, "lng": 79.52, "status": "IN_TRANSIT",
-     "partner": "Delhivery", "vehicle": "EV Van", "weather": "Clear", "distance_km": 620, "weight_kg": 12.0,
-     "delay_risk": 0.33, "risk_level": "LOW", "eta": "Apr 21, 4:00 PM"},
-    {"id": "SHP-006", "origin": "Indore", "destination": "Bhopal", "lat": 23.17, "lng": 75.81, "status": "IN_TRANSIT",
-     "partner": "Shadowfax", "vehicle": "Bike", "weather": "Clear", "distance_km": 190, "weight_kg": 2.5,
-     "delay_risk": 0.08, "risk_level": "LOW", "eta": "Apr 21, 11:00 AM"},
-    {"id": "SHP-007", "origin": "Guwahati", "destination": "Silchar", "lat": 25.59, "lng": 93.17, "status": "IN_TRANSIT",
-     "partner": "DHL", "vehicle": "Truck", "weather": "Rainy", "distance_km": 340, "weight_kg": 30.0,
-     "delay_risk": 0.72, "risk_level": "MEDIUM", "eta": "Apr 22, 1:00 PM"},
-    {"id": "SHP-008", "origin": "Coimbatore", "destination": "Madurai", "lat": 10.36, "lng": 77.00, "status": "IN_TRANSIT",
-     "partner": "XpressBees", "vehicle": "EV Van", "weather": "Clear", "distance_km": 210, "weight_kg": 6.0,
-     "delay_risk": 0.12, "risk_level": "LOW", "eta": "Apr 21, 12:00 PM"},
-])
+# Generate 250 realistic live shipments across India dynamically
+@st.cache_data(ttl=300) # Cache for 5 mins to simulate "live" updating
+def generate_live_shipments(n=250):
+    import numpy as np
+    
+    cities = ["Mumbai", "Delhi", "Bangalore", "Chennai", "Kolkata", "Hyderabad", "Pune", "Ahmedabad", "Jaipur", "Lucknow", "Patna", "Indore", "Guwahati", "Coimbatore"]
+    partners = ["Delhivery", "Shadowfax", "XpressBees", "DHL", "BlueDart", "Amazon Shipping"]
+    vehicles = ["Truck", "EV Van", "Heavy Trailer", "Bike", "Train Freight"]
+    weather_conds = ["Clear", "Rainy", "Stormy", "Foggy", "Extreme Heat"]
+    
+    data = []
+    for i in range(n):
+        orig = random.choice(cities)
+        dest = random.choice([c for c in cities if c != orig])
+        
+        # Approximate India Lat/Lng bounds (very rough box)
+        lat = np.random.uniform(10.0, 28.0)
+        lng = np.random.uniform(70.0, 88.0)
+        
+        distance = int(np.random.uniform(50, 2500))
+        weight = round(np.random.uniform(1.0, 5000.0), 1)
+        weather = random.choices(weather_conds, weights=[60, 20, 5, 10, 5])[0]
+        
+        # Dynamic risk calculation heuristic
+        risk = np.random.beta(a=2, b=5) # Skew towards lower risk naturally
+        if weather in ["Stormy", "Foggy"]:
+            risk += np.random.uniform(0.2, 0.5)
+        if distance > 1500:
+            risk += np.random.uniform(0.1, 0.3)
+            
+        risk = min(max(risk, 0.01), 0.99)
+        
+        if risk < 0.3:
+            risk_lvl = "LOW"
+        elif risk < 0.6:
+            risk_lvl = "MEDIUM"
+        elif risk < 0.85:
+            risk_lvl = "HIGH"
+        else:
+            risk_lvl = "CRITICAL"
+            
+        status = "IN_TRANSIT" if risk_lvl in ["LOW", "MEDIUM"] else random.choice(["IN_TRANSIT", "DELAYED"])
+        
+        data.append({
+            "id": f"SHP-{random.randint(10000, 99999)}",
+            "origin": orig,
+            "destination": dest,
+            "lat": lat,
+            "lng": lng,
+            "status": status,
+            "partner": random.choice(partners),
+            "vehicle": random.choice(vehicles),
+            "weather": weather,
+            "distance_km": distance,
+            "weight_kg": weight,
+            "delay_risk": risk,
+            "risk_level": risk_lvl,
+            "eta": f"Apr {random.randint(21, 26)}, {random.randint(8,20)}:00"
+        })
+    return pd.DataFrame(data)
+
+shipments = generate_live_shipments(250)
 
 # Sidebar filters
 st.sidebar.markdown("### Filters")

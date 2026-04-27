@@ -52,7 +52,9 @@ async def predict_delay(req: DelayPredictionRequest):
     import pandas as pd
     import joblib
     
-    pipeline = joblib.load("models/delay_predictor_v2.joblib")
+    import os
+    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
+    pipeline = joblib.load(os.path.join(_root, "models", "delay_predictor_v2.joblib"))
     features = pd.DataFrame([req.dict()])
     prob = float(pipeline.predict_proba(features)[0][1])
     pred = pipeline.predict(features)[0]
