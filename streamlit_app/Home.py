@@ -1,7 +1,7 @@
 import streamlit as st
 
 st.set_page_config(
-    page_title="Smart Supply Chain AI",
+    page_title="LogiTrack AI",
     page_icon="🚛",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -107,7 +107,7 @@ st.markdown("""
 # Header
 st.markdown("""
 <div class="main-header">
-    <h1>🚛 Smart Supply Chain AI</h1>
+    <h1>🚛 LogiTrack AI</h1>
     <p>AI-powered disruption prediction & autonomous rerouting for Indian logistics — powered by Gemini & XGBoost</p>
     <div style="margin-top: 1rem;">
         <span class="sdg-badge sdg-9">SDG 9: Industry & Innovation</span>
@@ -196,4 +196,4 @@ with col_d2:
     st.info("**LaDe (Cainiao-AI)** — 10M+ last-mile delivery packages across 5 cities with GPS trajectories and timestamps. Used for ETA prediction and spatial analysis.")
 
 st.markdown("---")
-st.caption("Built for Google Solution Challenge 2026 | Team Smart Supply Chain")
+st.caption("Built for Google Solution Challenge 2026 | Team LogiTrack AI")

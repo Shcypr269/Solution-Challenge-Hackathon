@@ -16,7 +16,7 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down...")
 
 app = FastAPI(
-    title="Self-Healing Supply Chain API",
+    title="LogiTrack AI API",
     description="Backend API for logistics disruption handling and AI agent orchestration.",
     version="0.1.0",
     lifespan=lifespan,

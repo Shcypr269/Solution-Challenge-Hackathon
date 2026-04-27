@@ -264,4 +264,4 @@ if submitted:
         st.warning("**Detected Issues:**\n" + "\n".join([f"- {r}" for r in result.anomaly_reasons]))
 
 st.markdown("---")
-st.caption("Anomaly Detection powered by Isolation Forest + Statistical Z-Score Ensemble | Smart Supply Chain AI")
+st.caption("Anomaly Detection powered by Isolation Forest + Statistical Z-Score Ensemble | LogiTrack AI")

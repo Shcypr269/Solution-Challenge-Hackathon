@@ -304,4 +304,4 @@ else:
     """, unsafe_allow_html=True)
 
 st.markdown("---")
-st.caption("What-If Simulator powered by XGBoost Delay Prediction | Smart Supply Chain AI")
+st.caption("What-If Simulator powered by XGBoost Delay Prediction | LogiTrack AI")

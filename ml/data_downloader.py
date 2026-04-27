@@ -287,7 +287,7 @@ def extract_india_ports(csv_path: str = "DataSet Download/UPPLY-SEAPORTS.csv") -
 # Main
 
 if __name__ == '__main__':
-    print("  Smart Supply Chain — Dataset Preparation Pipeline")
+    print("  LogiTrack AI — Dataset Preparation Pipeline")
     
     # 1. Preprocess DataCo
     print("\sample_size--- [1/3] DataCo Supply Chain (180K rows) ---")

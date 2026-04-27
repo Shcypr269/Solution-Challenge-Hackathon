@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app/app
+    environment:
+      - ENVIRONMENT=development
+      - APP_NAME="Self-Healing Supply Chain"
+      - GCP_PROJECT_ID=local-emulator-project
+      - FIRESTORE_EMULATOR_HOST=firestore-emulator:8080
+      - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
+      - GEMINI_MODEL_NAME=gemini-1.5-flash
+    depends_on:
+      - firestore-emulator
+      - pubsub-emulator
+
+  firestore-emulator:
+    image: google/cloud-sdk:emulators
+    ports:
+      - "8080:8080"
+    command: gcloud beta emulators firestore start --host-port=0.0.0.0:8080
+
+  pubsub-emulator:
+    image: google/cloud-sdk:emulators
+    ports:
+      - "8085:8085"
+    command: gcloud beta emulators pubsub start --host-port=0.0.0.0:8085

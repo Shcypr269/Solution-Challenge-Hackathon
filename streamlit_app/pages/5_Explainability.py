@@ -343,4 +343,4 @@ with tab3:
     """)
 
 st.markdown("---")
-st.caption("Model Explainability powered by XGBoost Feature Importance Analysis | Smart Supply Chain AI")
+st.caption("Model Explainability powered by XGBoost Feature Importance Analysis | LogiTrack AI")

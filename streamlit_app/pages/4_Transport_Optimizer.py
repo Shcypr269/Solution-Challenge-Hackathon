@@ -257,4 +257,4 @@ else:
     st.dataframe(pd.DataFrame(comp_data), use_container_width=True, hide_index=True)
 
 st.markdown("---")
-st.caption("Multi-Modal Optimizer calibrated for Indian logistics costs (AITD 2024 data) | Smart Supply Chain AI")
+st.caption("Multi-Modal Optimizer calibrated for Indian logistics costs (AITD 2024 data) | LogiTrack AI")

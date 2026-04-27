@@ -329,4 +329,4 @@ with tab3:
         st.info("Select a region and click **Fetch Incidents** to see live disruptions")
 
 st.markdown("---")
-st.caption("Real-time traffic data powered by TomTom Traffic APIs | Smart Supply Chain AI")
+st.caption("Real-time traffic data powered by TomTom Traffic APIs | LogiTrack AI")
