@@ -30,6 +30,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+async def root():
+    return {
+        "name": "LogiTrack AI",
+        "description": "AI-powered supply chain disruption prediction & autonomous rerouting",
+        "version": "0.1.0",
+        "docs": "/docs",
+        "health": "/health",
+        "endpoints": {
+            "predict_delay": "POST /api/v1/ml/predict-delay",
+            "predict_eta": "POST /api/v1/ml/predict-eta",
+            "anomaly_detect": "POST /api/v1/ml/anomaly-detect",
+            "whatif_simulator": "POST /api/v1/ml/whatif",
+            "explain_delay": "POST /api/v1/ml/explain-delay",
+            "optimize_transport": "POST /api/v1/ml/optimize-transport",
+        }
+    }
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "version": "0.1.0"}
