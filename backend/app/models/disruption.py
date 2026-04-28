@@ -20,7 +20,6 @@ class Disruption(BaseModel):
     timestamp: str
 
 class DisruptionReport(BaseModel):
-    """Payload received from the driver app"""
     shipment_id: str
     driver_id: str
     voice_transcript: str
