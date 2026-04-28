@@ -11,12 +11,11 @@ import json
 
 @dataclass
 class AnomalyResult:
-    """Single anomaly detection result."""
     shipment_id: str
     is_anomaly: bool
-    anomaly_score: float           # -1 (anomaly) to +1 (normal) from IF
+    anomaly_score: float           
     risk_level: str                # LOW, MEDIUM, HIGH, CRITICAL
-    anomaly_reasons: List[str]     # Human-readable reasons
+    anomaly_reasons: List[str]     
     feature_scores: Dict[str, float]  # Per-feature z-scores
 
 
@@ -27,7 +26,6 @@ class SupplyChainAnomalyDetector:
         'package_weight_kg': (0.1, 500),
     }
 
-    # India-specific risk corridors
     HIGH_RISK_CORRIDORS = {
         'north': {'base_risk': 0.15, 'monsoon_multiplier': 2.5},
         'south': {'base_risk': 0.08, 'monsoon_multiplier': 1.5},
@@ -61,12 +59,10 @@ class SupplyChainAnomalyDetector:
         # Fit scaler
         X_scaled = self.scaler.fit_transform(numeric_data)
         
-        # Store statistics for z-score analysis
         for col in self.NUMERIC_FEATURES:
             self._feature_means[col] = float(numeric_data[col].mean())
             self._feature_stds[col] = float(numeric_data[col].std())
         
-        # Fit Isolation Forest
         self.isolation_forest = IsolationForest(
             contamination=self.contamination,
             random_state=self.random_state,
@@ -88,7 +84,7 @@ class SupplyChainAnomalyDetector:
                 delivery_dataframe = pd.read_csv(p)
                 return self.fit(delivery_dataframe)
         
-        # Fallback: fit on synthetic distribution
+        # Fallbac
         print("WARNING: No CSV found, fitting on synthetic baseline")
         synthetic = pd.DataFrame({
             'distance_km': np.random.lognormal(4.5, 1.0, 1000),
@@ -104,7 +100,6 @@ class SupplyChainAnomalyDetector:
         reasons = []
         feature_scores = {}
         
-        # Isolation Forest
         numeric_df = pd.DataFrame([{
             'distance_km': shipment.get('distance_km', 100),
             'package_weight_kg': shipment.get('package_weight_kg', 5),
@@ -114,7 +109,7 @@ class SupplyChainAnomalyDetector:
         if_score = float(self.isolation_forest.score_samples(X_scaled)[0])
         if_prediction = int(self.isolation_forest.predict(X_scaled)[0])
         
-        # Z-Score Analysis
+        # Z-Scoree
         z_scores = {}
         for col in self.NUMERIC_FEATURES:
             val = shipment.get(col, 0)
@@ -132,7 +127,7 @@ class SupplyChainAnomalyDetector:
             elif z > 2:
                 reasons.append(f"{col}={val} deviates significantly (>2 std from mean)")
         
-        # Range Validation
+        # Range 
         for col, (lo, hi) in self.EXPECTED_RANGES.items():
             val = shipment.get(col, 0)
             if val < lo:
@@ -162,7 +157,6 @@ class SupplyChainAnomalyDetector:
             reasons.append(f"High-risk corridor: {region} region during adverse weather")
         
         # Combine scores
-        # Normalize IF score to 0-1 (lower = more anomalous)
         if_anomaly_prob = max(0, min(1, 0.5 - if_score))
         
         # Z-score component (average z-score, normalized)
@@ -237,7 +231,6 @@ class SupplyChainAnomalyDetector:
         }
     
     def save(self, path: str = 'models/anomaly_detector.joblib'):
-        """Save fitted detector to disk."""
         os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
         joblib.dump({
             'isolation_forest': self.isolation_forest,
@@ -249,7 +242,6 @@ class SupplyChainAnomalyDetector:
         print(f"Anomaly detector saved to {path}")
     
     def load(self, path: str = 'models/anomaly_detector.joblib') -> 'SupplyChainAnomalyDetector':
-        """Load fitted detector from disk."""
         candidates = [path, f'../{path}']
         for p in candidates:
             if os.path.exists(p):
@@ -265,7 +257,6 @@ class SupplyChainAnomalyDetector:
 
 
 def generate_test_fleet(n: int = 25) -> List[Dict]:
-    """Generate a realistic fleet with some anomalies injected."""
     np.random.seed(42)
     partners = ["delhivery", "shadowfax", "xpressbees", "dhl", "bluedart"]
     packages = ["electronics", "groceries", "automobile parts", "cosmetics", "medicines"]
@@ -276,7 +267,6 @@ def generate_test_fleet(n: int = 25) -> List[Dict]:
     
     fleet = []
     for i in range(n):
-        # Most shipments are normal
         if i < int(n * 0.8):
             dist = np.random.uniform(20, 600)
             weight = np.random.uniform(1, 50)
@@ -314,31 +304,27 @@ def generate_test_fleet(n: int = 25) -> List[Dict]:
 if __name__ == '__main__':
     print("  Supply Chain Anomaly Detection System")
     
-    # Initialize and fit detector
     detector = SupplyChainAnomalyDetector(contamination=0.15)
     detector.fit_on_csv()
     
-    # Generate test fleet with injected anomalies
     fleet = generate_test_fleet(25)
     
-    # Batch detection
     batch_result = detector.detect_batch(fleet)
-    
-    # Print summary
+
     summary = batch_result['summary']
-    print(f"\n[FLEET] Analysis Summary:")
+    print(f"\nAnalysis Summary:")
     print(f"   Total shipments:     {summary['total_shipments']}")
     print(f"   Anomalies detected:  {summary['anomalies_detected']}")
     print(f"   Anomaly rate:        {summary['anomaly_rate']:.1%}")
     print(f"   Critical alerts:     {summary['critical_alerts']}")
     print(f"   High alerts:         {summary['high_alerts']}")
     
-    print(f"\n[RISK] Distribution:")
+    print(f"\n Distribution:")
     for level, count in batch_result['risk_distribution'].items():
         bar = '#' * count
         print(f"   {level:10s} {count:>3d} {bar}")
     
-    print(f"\n[ALERT] Anomalous Shipments:")
+    print(f"\n Anomalous Shipments:")
     for r in batch_result['results']:
         if r['is_anomaly']:
             print(f"\n   {r['shipment_id']} -- Score: {r['anomaly_score']:.2f} [{r['risk_level']}]")
