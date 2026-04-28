@@ -1,9 +1,6 @@
 from app.api.routes.websocket import notify_managers
 
 async def send_recommendation_alert(shipment_id: str, recommendation: dict):
-    """
-    Pushes a recommendation to all connected manager dashboards via WebSocket.
-    """
     alert = {
         "type": "recommendation",
         "shipment_id": shipment_id,
