@@ -9,9 +9,6 @@ async def send_recommendation_alert(shipment_id: str, recommendation: dict):
     await notify_managers(alert)
 
 async def send_disruption_alert(shipment_id: str, disruption: dict):
-    """
-    Pushes a disruption detection alert to manager dashboards.
-    """
     alert = {
         "type": "disruption_detected",
         "shipment_id": shipment_id,
