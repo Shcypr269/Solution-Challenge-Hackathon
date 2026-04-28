@@ -27,6 +27,5 @@ class DelayPredictor:
             prob = self.model.predict_proba(features)[0][1]
             return prob > 0.5, prob
     
-        # Fallback heuristic if model missing
         default_prob = 0.85 if features["distance_km"].iloc[0] > 200 else 0.1
         return default_prob > 0.5, default_prob
