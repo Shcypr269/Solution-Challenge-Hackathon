@@ -119,8 +119,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Key Metrics — live from ML engine
-import requests, os, sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import requests, os
 
 ML_URL = os.environ.get("ML_ENGINE_URL", "https://logitrackai.onrender.com")
 

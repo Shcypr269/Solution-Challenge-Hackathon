@@ -1,19 +1,15 @@
 """
 Real-Time Traffic Monitor — Streamlit Page
 Live traffic conditions across Indian logistics corridors using TomTom API.
+Now uses HTTP calls to the FastAPI backend instead of direct ML imports.
 """
 import streamlit as st
 import pandas as pd
 import numpy as np
-import sys
+import requests
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-
-from ml.tomtom_traffic import (
-    get_traffic_flow, calculate_route, get_traffic_incidents,
-    scan_corridor_traffic, INDIA_CORRIDORS, API_KEY
-)
+ML_URL = os.environ.get("ML_ENGINE_URL", "https://logitrackai.onrender.com")
 
 st.set_page_config(page_title="Live Traffic", page_icon="🚦", layout="wide")
 
@@ -80,8 +76,26 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-if not API_KEY:
-    st.error("TomTom API key not found. Set `TOMTOM_API_KEY` in `backend/.env`")
+# ── Check API key availability via backend ──
+try:
+    corridors_resp = requests.get(f"{ML_URL}/api/v1/traffic/corridors", timeout=10)
+    if corridors_resp.ok:
+        corridors_data = corridors_resp.json()
+        CORRIDORS = corridors_data.get("corridors", {})
+        api_key_present = corridors_data.get("api_key_present", False)
+    else:
+        CORRIDORS = {}
+        api_key_present = False
+except:
+    CORRIDORS = {}
+    api_key_present = False
+
+if not api_key_present:
+    st.error("TomTom API key not found on backend. Set `TOMTOM_API_KEY` in `backend/.env`")
+    st.stop()
+
+if not CORRIDORS:
+    st.error("Could not fetch corridor data from backend. Make sure FastAPI is running.")
     st.stop()
 
 # ── Tabs ──
@@ -95,34 +109,63 @@ with tab1:
     
     col_ctrl, _ = st.columns([1, 2])
     with col_ctrl:
+        default_selection = []
+        for cid in ["mumbai_delhi", "chennai_bangalore", "delhi_jaipur"]:
+            if cid in CORRIDORS:
+                default_selection.append(cid)
+        
         selected_corridors = st.multiselect(
             "Select corridors to monitor",
-            list(INDIA_CORRIDORS.keys()),
-            default=["mumbai_delhi", "chennai_bangalore", "delhi_jaipur"],
-            format_func=lambda x: INDIA_CORRIDORS[x]["name"]
+            list(CORRIDORS.keys()),
+            default=default_selection,
+            format_func=lambda x: CORRIDORS[x]["name"]
         )
     
     if st.button("🔄 Refresh Traffic Data", use_container_width=True, type="primary"):
         for cid in selected_corridors:
-            corridor = INDIA_CORRIDORS[cid]
+            corridor = CORRIDORS[cid]
+            origin = corridor["origin"]
+            dest = corridor["destination"]
+            via = corridor.get("via", [])
+            
             with st.spinner(f"Scanning {corridor['name']}..."):
                 # Get traffic at origin and destination
-                origin_flow = get_traffic_flow(corridor["origin"][0], corridor["origin"][1])
-                dest_flow = get_traffic_flow(corridor["destination"][0], corridor["destination"][1])
+                origin_flow = None
+                dest_flow = None
+                route = None
                 
-                # Get route info
-                route = calculate_route(
-                    corridor["origin"],
-                    corridor["destination"],
-                    via=corridor.get("via") or None,
-                    traffic=True
-                )
+                try:
+                    r1 = requests.post(f"{ML_URL}/api/v1/traffic/flow", json={"lat": origin[0], "lng": origin[1]}, timeout=15)
+                    if r1.ok and "error" not in r1.json():
+                        origin_flow = r1.json()
+                except:
+                    pass
+                
+                try:
+                    r2 = requests.post(f"{ML_URL}/api/v1/traffic/flow", json={"lat": dest[0], "lng": dest[1]}, timeout=15)
+                    if r2.ok and "error" not in r2.json():
+                        dest_flow = r2.json()
+                except:
+                    pass
+                
+                try:
+                    route_payload = {
+                        "origin": origin,
+                        "destination": dest,
+                        "via": via if via else None,
+                        "traffic": True,
+                    }
+                    r3 = requests.post(f"{ML_URL}/api/v1/traffic/route", json=route_payload, timeout=15)
+                    if r3.ok and "error" not in r3.json():
+                        route = r3.json()
+                except:
+                    pass
             
             # Determine congestion level
             if origin_flow and dest_flow:
-                avg_congestion = (origin_flow.congestion_ratio + dest_flow.congestion_ratio) / 2
+                avg_congestion = (origin_flow["congestion_ratio"] + dest_flow["congestion_ratio"]) / 2
                 level = (
-                    "closed" if origin_flow.road_closure or dest_flow.road_closure else
+                    "closed" if origin_flow.get("road_closure") or dest_flow.get("road_closure") else
                     "severe" if avg_congestion > 0.7 else
                     "moderate" if avg_congestion > 0.4 else
                     "light" if avg_congestion > 0.15 else
@@ -144,11 +187,11 @@ with tab1:
                     </div>
                 </div>
                 <div class="metric-row">
-                    {'<div class="mini-metric">Distance: <span>' + str(route.distance_km) + ' km</span></div>' if route else ''}
-                    {'<div class="mini-metric">ETA: <span>' + str(int(route.travel_time_mins)) + ' min</span></div>' if route else ''}
-                    {'<div class="mini-metric">Traffic Delay: <span>+' + str(int(route.traffic_delay_mins)) + ' min</span></div>' if route else ''}
-                    {'<div class="mini-metric">Origin Speed: <span>' + str(origin_flow.current_speed_kmh) + ' km/h</span></div>' if origin_flow else ''}
-                    {'<div class="mini-metric">Dest Speed: <span>' + str(dest_flow.current_speed_kmh) + ' km/h</span></div>' if dest_flow else ''}
+                    {'<div class="mini-metric">Distance: <span>' + str(route["distance_km"]) + ' km</span></div>' if route else ''}
+                    {'<div class="mini-metric">ETA: <span>' + str(int(route["travel_time_mins"])) + ' min</span></div>' if route else ''}
+                    {'<div class="mini-metric">Traffic Delay: <span>+' + str(int(route["traffic_delay_mins"])) + ' min</span></div>' if route else ''}
+                    {'<div class="mini-metric">Origin Speed: <span>' + str(origin_flow["current_speed_kmh"]) + ' km/h</span></div>' if origin_flow else ''}
+                    {'<div class="mini-metric">Dest Speed: <span>' + str(dest_flow["current_speed_kmh"]) + ' km/h</span></div>' if dest_flow else ''}
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -157,7 +200,7 @@ with tab1:
         
         # Show corridor list
         st.markdown("#### Available Corridors")
-        for cid, corridor in INDIA_CORRIDORS.items():
+        for cid, corridor in CORRIDORS.items():
             st.markdown(f"- **{corridor['name']}**: `{corridor['origin']}` → `{corridor['destination']}`")
 
 # ═══════════════════════════════════════════
@@ -171,20 +214,20 @@ with tab2:
     
     # Indian city coordinates
     cities = {
-        "Mumbai": (19.0760, 72.8777),
-        "Delhi": (28.6139, 77.2090),
-        "Bangalore": (12.9716, 77.5946),
-        "Chennai": (13.0827, 80.2707),
-        "Kolkata": (22.5726, 88.3639),
-        "Hyderabad": (17.3850, 78.4867),
-        "Pune": (18.5204, 73.8567),
-        "Ahmedabad": (23.0225, 72.5714),
-        "Jaipur": (26.9124, 75.7873),
-        "Lucknow": (26.8467, 80.9462),
-        "Visakhapatnam": (17.6868, 83.2185),
-        "Indore": (22.7196, 75.8577),
-        "JNPT Port": (18.9543, 72.9486),
-        "Mundra Port": (22.8386, 69.7193),
+        "Mumbai": [19.0760, 72.8777],
+        "Delhi": [28.6139, 77.2090],
+        "Bangalore": [12.9716, 77.5946],
+        "Chennai": [13.0827, 80.2707],
+        "Kolkata": [22.5726, 88.3639],
+        "Hyderabad": [17.3850, 78.4867],
+        "Pune": [18.5204, 73.8567],
+        "Ahmedabad": [23.0225, 72.5714],
+        "Jaipur": [26.9124, 75.7873],
+        "Lucknow": [26.8467, 80.9462],
+        "Visakhapatnam": [17.6868, 83.2185],
+        "Indore": [22.7196, 75.8577],
+        "JNPT Port": [18.9543, 72.9486],
+        "Mundra Port": [22.8386, 69.7193],
     }
     
     with col_o:
@@ -203,32 +246,38 @@ with tab2:
         dest = cities[dest_city]
         
         with st.spinner(f"Calculating route {origin_city} → {dest_city}..."):
-            route = calculate_route(
-                origin, dest,
-                traffic=use_traffic,
-                vehicle_weight_kg=vehicle_weight if vehicle_weight > 0 else None
-            )
+            try:
+                route_payload = {
+                    "origin": origin,
+                    "destination": dest,
+                    "traffic": use_traffic,
+                    "vehicle_weight_kg": vehicle_weight if vehicle_weight > 0 else None,
+                }
+                r = requests.post(f"{ML_URL}/api/v1/traffic/route", json=route_payload, timeout=15)
+                route = r.json() if r.ok and "error" not in r.json() else None
+            except:
+                route = None
         
         if route:
             rc1, rc2, rc3, rc4 = st.columns(4)
-            rc1.metric("Distance", f"{route.distance_km} km")
-            rc2.metric("Travel Time", f"{route.travel_time_mins:.0f} min")
-            rc3.metric("Traffic Delay", f"+{route.traffic_delay_mins:.0f} min")
-            rc4.metric("Avg Speed", f"{route.distance_km / max(route.travel_time_mins/60, 0.1):.0f} km/h")
+            rc1.metric("Distance", f"{route['distance_km']} km")
+            rc2.metric("Travel Time", f"{route['travel_time_mins']:.0f} min")
+            rc3.metric("Traffic Delay", f"+{route['traffic_delay_mins']:.0f} min")
+            rc4.metric("Avg Speed", f"{route['distance_km'] / max(route['travel_time_mins']/60, 0.1):.0f} km/h")
             
             st.markdown(f"""
             <div class="route-box">
                 <strong>{origin_city} → {dest_city}</strong><br>
-                <span style="font-size:0.9rem; opacity:0.8;">{route.summary}</span><br>
+                <span style="font-size:0.9rem; opacity:0.8;">{route['summary']}</span><br>
                 <span style="font-size:0.85rem; opacity:0.7;">
-                    Departure: {route.departure_time[:19] if route.departure_time else 'Now'} | 
-                    Arrival: {route.arrival_time[:19] if route.arrival_time else 'N/A'}
+                    Departure: {route['departure_time'][:19] if route.get('departure_time') else 'Now'} | 
+                    Arrival: {route['arrival_time'][:19] if route.get('arrival_time') else 'N/A'}
                 </span>
             </div>
             """, unsafe_allow_html=True)
             
             # Show route on map
-            if route.points:
+            if route.get('points'):
                 import folium
                 from streamlit_folium import st_folium
                 
@@ -238,7 +287,7 @@ with tab2:
                 m = folium.Map(location=[mid_lat, mid_lng], zoom_start=6, tiles="CartoDB dark_matter")
                 
                 # Route line
-                route_coords = [(p["lat"], p["lng"]) for p in route.points]
+                route_coords = [(p["lat"], p["lng"]) for p in route['points']]
                 folium.PolyLine(route_coords, color="#e94560", weight=4, opacity=0.8).add_to(m)
                 
                 # Markers
@@ -265,15 +314,15 @@ with tab3:
     st.markdown("Real-time disruptions detected across Indian logistics regions")
     
     region_boxes = {
-        "Mumbai Region": (18.5, 72.5, 19.5, 73.5),
-        "Delhi NCR": (28.0, 76.5, 29.0, 77.5),
-        "Bangalore": (12.5, 77.0, 13.5, 78.0),
-        "Chennai": (12.5, 79.5, 13.5, 80.5),
-        "Kolkata": (22.0, 87.5, 23.0, 89.0),
-        "Hyderabad": (17.0, 78.0, 18.0, 79.0),
-        "Pune": (18.0, 73.5, 19.0, 74.5),
-        "Ahmedabad": (22.5, 72.0, 23.5, 73.0),
-        "All India": (8.0, 68.0, 37.0, 97.0),
+        "Mumbai Region": [18.5, 72.5, 19.5, 73.5],
+        "Delhi NCR": [28.0, 76.5, 29.0, 77.5],
+        "Bangalore": [12.5, 77.0, 13.5, 78.0],
+        "Chennai": [12.5, 79.5, 13.5, 80.5],
+        "Kolkata": [22.0, 87.5, 23.0, 89.0],
+        "Hyderabad": [17.0, 78.0, 18.0, 79.0],
+        "Pune": [18.0, 73.5, 19.0, 74.5],
+        "Ahmedabad": [22.5, 72.0, 23.5, 73.0],
+        "All India": [8.0, 68.0, 37.0, 97.0],
     }
     
     selected_region = st.selectbox("Region", list(region_boxes.keys()), index=0)
@@ -282,7 +331,15 @@ with tab3:
         bbox = region_boxes[selected_region]
         
         with st.spinner(f"Fetching incidents in {selected_region}..."):
-            incidents = get_traffic_incidents(bbox)
+            try:
+                r = requests.post(f"{ML_URL}/api/v1/traffic/incidents", json={"bbox": bbox}, timeout=15)
+                if r.ok:
+                    data = r.json()
+                    incidents = data.get("incidents", [])
+                else:
+                    incidents = []
+            except:
+                incidents = []
         
         if incidents:
             st.success(f"Found **{len(incidents)}** active incidents in {selected_region}")
@@ -290,7 +347,7 @@ with tab3:
             # Category breakdown
             categories = {}
             for inc in incidents:
-                categories[inc.category] = categories.get(inc.category, 0) + 1
+                categories[inc["category"]] = categories.get(inc["category"], 0) + 1
             
             if categories:
                 import plotly.express as px
@@ -309,17 +366,19 @@ with tab3:
             # Incident list
             for inc in incidents[:20]:
                 severity_colors = {0: '#888', 1: '#fdcb6e', 2: '#e17055', 3: '#d63031', 4: '#6c5ce7'}
-                color = severity_colors.get(inc.severity, '#888')
+                color = severity_colors.get(inc["severity"], '#888')
+                
+                road_nums = inc.get("road_numbers", [])
                 
                 st.markdown(f"""
                 <div style="background:#1a1a2e; border:1px solid #333; border-left:4px solid {color}; 
                             border-radius:8px; padding:0.8rem 1rem; margin-bottom:0.5rem; color:#eee;">
-                    <strong>[{inc.category}]</strong> {inc.description}
+                    <strong>[{inc['category']}]</strong> {inc['description']}
                     <br><span style="font-size:0.8rem; color:#aaa;">
-                        {inc.from_location} → {inc.to_location} | 
-                        Delay: {inc.delay_seconds//60} min | 
-                        Length: {inc.length_meters}m
-                        {' | Roads: ' + ', '.join(inc.road_numbers) if inc.road_numbers else ''}
+                        {inc['from_location']} → {inc['to_location']} | 
+                        Delay: {inc['delay_seconds']//60} min | 
+                        Length: {inc['length_meters']}m
+                        {' | Roads: ' + ', '.join(road_nums) if road_nums else ''}
                     </span>
                 </div>
                 """, unsafe_allow_html=True)

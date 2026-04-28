@@ -1,16 +1,15 @@
 """
 Multi-Modal Transport Optimizer — Streamlit Page
 Compare road, rail, air, and waterway options for Indian logistics.
+Now uses HTTP calls to the FastAPI backend instead of direct ML imports.
 """
 import streamlit as st
 import pandas as pd
 import numpy as np
-import sys
+import requests
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-
-from ml.multimodal_optimizer import optimize_transport, TRANSPORT_MODES
+ML_URL = os.environ.get("ML_ENGINE_URL", "https://logitrackai.onrender.com")
 
 st.set_page_config(page_title="Transport Optimizer", page_icon="🚚", layout="wide")
 
@@ -71,19 +70,20 @@ st.markdown("""
 
 # ── Transport Modes Overview ──
 with st.expander("📖 Available Transport Modes", expanded=False):
-    modes_data = []
-    for mode_id, mode in TRANSPORT_MODES.items():
-        modes_data.append({
-            'Mode': mode.name,
-            'Cost/Tonne-Km (₹)': mode.cost_per_tonne_km,
-            'Speed (km/h)': mode.speed_kmh,
-            'CO₂/km (kg)': mode.co2_per_km_kg,
-            'Fixed Cost (₹)': mode.fixed_cost,
-            'Min Distance (km)': mode.min_distance_km,
-            'Max Weight (kg)': f"{mode.max_weight_kg:,}",
-            'Reliability': f"{mode.reliability:.0%}",
-        })
-    st.dataframe(pd.DataFrame(modes_data), use_container_width=True, hide_index=True)
+    try:
+        r = requests.get(f"{ML_URL}/api/v1/ml/transport-modes", timeout=15)
+        if r.ok:
+            modes_data = r.json().get("modes", [])
+            if modes_data:
+                modes_df = pd.DataFrame(modes_data)
+                modes_df.columns = [c.replace('_', ' ').title() for c in modes_df.columns]
+                st.dataframe(modes_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No transport modes data available.")
+        else:
+            st.warning("Could not fetch transport modes from backend.")
+    except Exception as e:
+        st.warning(f"Could not connect to backend: {e}")
 
 # ── Input Form ──
 st.markdown("### 📦 Shipment Details")
@@ -140,10 +140,27 @@ use_dl = selected_route['dl'] if selected_route else deadline
 if selected_route:
     st.info(f"📍 Using route: **{selected_route['label']}** — {use_dist} km, {use_wt} kg, {use_dl}h deadline")
 
-result = optimize_transport(use_dist, use_wt, use_dl, priority, weather_severity)
-rec = result['recommended']
-alternatives = result['alternatives']
-savings = result['savings']
+# Call FastAPI optimize-transport endpoint
+try:
+    payload = {
+        "distance_km": use_dist,
+        "weight_kg": use_wt,
+        "deadline_hours": use_dl,
+        "priority": priority,
+        "weather_severity": weather_severity,
+    }
+    r = requests.post(f"{ML_URL}/api/v1/ml/optimize-transport", json=payload, timeout=15)
+    if not r.ok:
+        st.error(f"ML Engine returned {r.status_code}: {r.text[:200]}")
+        st.stop()
+    result = r.json()
+except Exception as e:
+    st.error(f"Connection error: {e}")
+    st.stop()
+
+rec = result.get('recommended')
+alternatives = result.get('alternatives', [])
+savings = result.get('savings', {})
 
 if not rec:
     st.error("No viable transport mode found for this combination. Try adjusting weight or distance.")
@@ -172,7 +189,7 @@ else:
     """, unsafe_allow_html=True)
     
     # Savings
-    if savings['cost_saving_inr'] > 0 or savings['co2_saving_kg'] > 0:
+    if savings.get('cost_saving_inr', 0) > 0 or savings.get('co2_saving_kg', 0) > 0:
         sc1, sc2 = st.columns(2)
         with sc1:
             st.markdown(f'<span class="savings-badge save-cost">💰 Saves ₹{savings["cost_saving_inr"]:,} vs most expensive option</span>', unsafe_allow_html=True)

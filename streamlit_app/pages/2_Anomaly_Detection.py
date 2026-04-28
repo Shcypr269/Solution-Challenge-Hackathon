@@ -1,16 +1,15 @@
 """
 Anomaly Detection Dashboard — Streamlit Page
 Visualizes real-time anomaly detection across the fleet using Isolation Forest.
+Now uses HTTP calls to the FastAPI backend instead of direct ML imports.
 """
 import streamlit as st
 import pandas as pd
 import numpy as np
-import sys
+import requests
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-
-from ml.anomaly_detector import SupplyChainAnomalyDetector, generate_test_fleet
+ML_URL = os.environ.get("ML_ENGINE_URL", "https://logitrackai.onrender.com")
 
 st.set_page_config(page_title="Anomaly Detection", page_icon="🔍", layout="wide")
 
@@ -71,15 +70,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ── Initialize Detector ──
-@st.cache_resource
-def get_detector():
-    detector = SupplyChainAnomalyDetector(contamination=0.15)
-    detector.fit_on_csv()
-    return detector
-
-detector = get_detector()
-
 # ── Controls ──
 col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([1, 1, 2])
 with col_ctrl1:
@@ -87,11 +77,26 @@ with col_ctrl1:
 with col_ctrl2:
     sensitivity = st.select_slider("Sensitivity", options=["Low", "Medium", "High"], value="Medium")
 
-# Generate fleet
-fleet = generate_test_fleet(fleet_size)
-batch_result = detector.detect_batch(fleet)
+# ── Fetch batch anomaly data from FastAPI ──
+@st.cache_data(ttl=120)
+def fetch_anomaly_batch(size):
+    try:
+        r = requests.post(f"{ML_URL}/api/v1/ml/anomaly-detect-batch", json={"fleet_size": size}, timeout=30)
+        if r.ok:
+            return r.json()
+    except Exception as e:
+        st.error(f"Connection error: {e}")
+    return None
+
+batch_result = fetch_anomaly_batch(fleet_size)
+
+if not batch_result:
+    st.error("Could not connect to ML engine. Make sure the FastAPI backend is running.")
+    st.stop()
+
 summary = batch_result['summary']
 risk_dist = batch_result['risk_distribution']
+fleet = batch_result.get('fleet', [])
 
 # ── Summary Metrics ──
 c1, c2, c3, c4 = st.columns(4)
@@ -161,6 +166,9 @@ st.markdown("### 🚨 Anomaly Alerts")
 anomalies = [r for r in batch_result['results'] if r['is_anomaly']]
 anomalies.sort(key=lambda x: x['anomaly_score'], reverse=True)
 
+# Build a lookup map from fleet data
+fleet_map = {s.get('shipment_id', ''): s for s in fleet} if fleet else {}
+
 if not anomalies:
     st.success("✅ No anomalies detected in the current fleet!")
 else:
@@ -169,8 +177,8 @@ else:
         score_pct = f"{r['anomaly_score']:.0%}"
         reasons_html = "".join([f"<br>⚠️ {reason}" for reason in r['reasons']])
         
-        # Get original shipment data
-        shipment = next((s for s in fleet if s['shipment_id'] == r['shipment_id']), {})
+        # Get original shipment data from fleet
+        shipment = fleet_map.get(r['shipment_id'], {})
         
         st.markdown(f"""
         <div class="anomaly-row {level_class}">
@@ -204,7 +212,7 @@ st.markdown("### 📋 Complete Fleet Analysis")
 
 table_data = []
 for r in batch_result['results']:
-    shipment = next((s for s in fleet if s['shipment_id'] == r['shipment_id']), {})
+    shipment = fleet_map.get(r['shipment_id'], {})
     table_data.append({
         'ID': r['shipment_id'],
         'Region': shipment.get('region', '').title(),
@@ -242,7 +250,7 @@ with st.form("single_test"):
     submitted = st.form_submit_button("🔍 Analyze Shipment", use_container_width=True)
 
 if submitted:
-    test_shipment = {
+    test_payload = {
         'shipment_id': 'TEST-001',
         'distance_km': test_dist,
         'package_weight_kg': test_weight,
@@ -253,15 +261,21 @@ if submitted:
         'package_type': test_package,
         'delivery_mode': test_mode,
     }
-    result = detector.detect(test_shipment)
-    
-    rc1, rc2, rc3 = st.columns(3)
-    rc1.metric("Anomaly Score", f"{result.anomaly_score:.2%}")
-    rc2.metric("Risk Level", result.risk_level)
-    rc3.metric("Status", "🔴 ANOMALY" if result.is_anomaly else "🟢 NORMAL")
-    
-    if result.anomaly_reasons:
-        st.warning("**Detected Issues:**\n" + "\n".join([f"- {r}" for r in result.anomaly_reasons]))
+    try:
+        r = requests.post(f"{ML_URL}/api/v1/ml/anomaly-detect", json=test_payload, timeout=30)
+        if r.ok:
+            result = r.json()
+            rc1, rc2, rc3 = st.columns(3)
+            rc1.metric("Anomaly Score", f"{result['anomaly_score']:.2%}")
+            rc2.metric("Risk Level", result['risk_level'])
+            rc3.metric("Status", "🔴 ANOMALY" if result['is_anomaly'] else "🟢 NORMAL")
+            
+            if result.get('reasons'):
+                st.warning("**Detected Issues:**\n" + "\n".join([f"- {r}" for r in result['reasons']]))
+        else:
+            st.error(f"ML Engine returned {r.status_code}: {r.text[:200]}")
+    except Exception as e:
+        st.error(f"Connection error: {e}")
 
 st.markdown("---")
 st.caption("Anomaly Detection powered by Isolation Forest + Statistical Z-Score Ensemble | LogiTrack AI")

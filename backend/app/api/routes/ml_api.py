@@ -1,17 +1,37 @@
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional
-import sys, os
+import sys, os, json
+import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
 
 router = APIRouter()
+
+
+def _numpy_safe(obj):
+    """Recursively convert numpy types to native Python types for JSON serialization."""
+    if isinstance(obj, dict):
+        return {k: _numpy_safe(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_numpy_safe(v) for v in obj]
+    elif isinstance(obj, (np.bool_, )):
+        return bool(obj)
+    elif isinstance(obj, (np.integer, )):
+        return int(obj)
+    elif isinstance(obj, (np.floating, )):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return obj
 
 class SimulationRequest(BaseModel):
     disruption_type: str = Field(description="weather | port_congestion | highway_closure | strike")
     affected_region: str = Field(description="north | south | east | west | central")
     severity: float = Field(default=0.7, ge=0.0, le=1.0)
     fleet_size: int = Field(default=20, ge=5, le=100)
+    inject_region: bool = Field(default=False, description="Inject affected_region into ~30% of fleet")
 
 class ETARequest(BaseModel):
     distance_km: float
@@ -37,14 +57,17 @@ async def run_whatif_simulation(req: SimulationRequest):
     """Run a what-if disruption simulation across a fleet of shipments."""
     from ml.whatif_simulator import WhatIfSimulator
     sim = WhatIfSimulator()
-    fleet = sim.generate_sample_fleet(req.fleet_size)
+    inject = req.affected_region if req.inject_region else None
+    fleet = sim.generate_sample_fleet(req.fleet_size, inject_region=inject)
     result = sim.simulate_disruption(
         shipments=fleet,
         disruption_type=req.disruption_type,
         affected_region=req.affected_region,
         severity=req.severity
     )
-    return result
+    # Include fleet details so frontend can display shipment metadata
+    result["fleet"] = fleet
+    return JSONResponse(content=_numpy_safe(result))
 
 @router.post("/predict-delay")
 async def predict_delay(req: DelayPredictionRequest):
@@ -110,14 +133,14 @@ async def detect_anomaly(req: AnomalyDetectRequest):
     detector = SupplyChainAnomalyDetector(contamination=0.15)
     detector.fit_on_csv()
     result = detector.detect(req.dict())
-    return {
+    return JSONResponse(content=_numpy_safe({
         "shipment_id": result.shipment_id,
         "is_anomaly": result.is_anomaly,
         "anomaly_score": result.anomaly_score,
         "risk_level": result.risk_level,
         "reasons": result.anomaly_reasons,
         "feature_scores": result.feature_scores,
-    }
+    }))
 
 @router.post("/anomaly-detect-batch")
 async def detect_anomaly_batch(req: AnomalyBatchRequest):
@@ -126,7 +149,10 @@ async def detect_anomaly_batch(req: AnomalyBatchRequest):
     detector = SupplyChainAnomalyDetector(contamination=0.15)
     detector.fit_on_csv()
     fleet = generate_test_fleet(req.fleet_size)
-    return detector.detect_batch(fleet)
+    result = detector.detect_batch(fleet)
+    # Include fleet details so frontend can display shipment metadata
+    result["fleet"] = fleet
+    return JSONResponse(content=_numpy_safe(result))
 
 
 # ── Explainability Endpoints ──
@@ -183,4 +209,37 @@ async def optimize_transport_route(req: TransportOptRequest):
         priority=req.priority,
         weather_severity=req.weather_severity,
     )
+
+
+# ── Transport Modes Metadata ──
+
+@router.get("/transport-modes")
+async def get_transport_modes():
+    """Return available transport mode details for the optimizer UI."""
+    from ml.multimodal_optimizer import TRANSPORT_MODES
+    modes = []
+    for mode_id, mode in TRANSPORT_MODES.items():
+        modes.append({
+            "mode_id": mode_id,
+            "name": mode.name,
+            "cost_per_tonne_km": mode.cost_per_tonne_km,
+            "speed_kmh": mode.speed_kmh,
+            "co2_per_km_kg": mode.co2_per_km_kg,
+            "fixed_cost": mode.fixed_cost,
+            "min_distance_km": mode.min_distance_km,
+            "max_weight_kg": mode.max_weight_kg,
+            "reliability": mode.reliability,
+        })
+    return {"modes": modes}
+
+
+# ── Global Feature Importance ──
+
+@router.get("/global-importance")
+async def get_global_importance():
+    """Return global feature importance from the delay predictor model."""
+    from ml.explainability import DelayExplainer
+    explainer = DelayExplainer()
+    importance = explainer.get_global_importance()
+    return {"features": importance}
 

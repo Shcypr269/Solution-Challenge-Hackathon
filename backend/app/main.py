@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import disruptions, websocket, shipments, routing, ml_api
+from app.api.routes import disruptions, websocket, shipments, routing, ml_api, traffic_api
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -56,4 +56,5 @@ app.include_router(shipments.router, prefix="/api/v1/shipments", tags=["Shipment
 app.include_router(disruptions.router, prefix="/api/v1/disruptions", tags=["Disruptions"])
 app.include_router(routing.router, prefix="/api/v1/routes", tags=["Routing"])
 app.include_router(ml_api.router, prefix="/api/v1/ml", tags=["ML Predictions"])
+app.include_router(traffic_api.router, prefix="/api/v1/traffic", tags=["Traffic"])
 app.include_router(websocket.router, tags=["Realtime"])

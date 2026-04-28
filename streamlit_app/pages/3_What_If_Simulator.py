@@ -1,16 +1,15 @@
 """
 What-If Simulator — Streamlit Page
 Interactive disruption scenario simulator that shows how disruptions propagate across the fleet.
+Now uses HTTP calls to the FastAPI backend instead of direct ML imports.
 """
 import streamlit as st
 import pandas as pd
 import numpy as np
-import sys
+import requests
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-
-from ml.whatif_simulator import WhatIfSimulator
+ML_URL = os.environ.get("ML_ENGINE_URL", "https://logitrackai.onrender.com")
 
 st.set_page_config(page_title="What-If Simulator", page_icon="🧪", layout="wide")
 
@@ -68,13 +67,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ── Initialize ──
-@st.cache_resource
-def get_simulator():
-    return WhatIfSimulator()
-
-sim = get_simulator()
-
 # ── Scenario Builder ──
 st.markdown("### 🎛️ Build Your Scenario")
 
@@ -102,7 +94,6 @@ with col_s1:
 
 with col_s2:
     if disruption_type == "weather" and has_weather_data:
-        # Get top 50 districts by risk
         districts = weather_risks['Location'].tolist()[:50]
         affected_region = st.selectbox(
             "Affected District (Real-Time IMD Data)",
@@ -136,11 +127,18 @@ with col_s4:
     fleet_size = st.slider("Fleet Size", 10, 50, 25)
 
 # ── Disruption context ──
+_district_risk_label = ""
+if has_weather_data and disruption_type == "weather":
+    try:
+        _district_risk_label = weather_risks[weather_risks['Location'] == affected_region]['Weather_Risk'].values[0]
+    except:
+        _district_risk_label = "Severe Weather"
+
 context_map = {
     'weather': {
         'description': 'Heavy rainfall causing road flooding, reduced visibility, and increased accident risk.',
         'icon': '🌧️',
-        'india_example': f'LIVE DATA: {affected_region.title()} is currently facing {district_risk if (has_weather_data and disruption_type=="weather") else "Severe Weather"}'
+        'india_example': f'LIVE DATA: {affected_region.title()} is currently facing {_district_risk_label or "Severe Weather"}'
     },
     'highway_closure': {
         'description': 'Major highway segment closed due to accident/construction, forcing detours.',
@@ -164,15 +162,26 @@ st.info(f"**{ctx['icon']} {disruption_type.replace('_', ' ').title()}:** {ctx['d
 
 # ── Run Simulation ──
 if st.button("🚀 Run Simulation", use_container_width=True, type="primary"):
-    fleet = sim.generate_sample_fleet(fleet_size, inject_region=affected_region)
     
     with st.spinner("Simulating disruption propagation across fleet..."):
-        result = sim.simulate_disruption(
-            shipments=fleet,
-            disruption_type=disruption_type,
-            affected_region=affected_region,
-            severity=severity
-        )
+        try:
+            payload = {
+                "disruption_type": disruption_type,
+                "affected_region": affected_region,
+                "severity": severity,
+                "fleet_size": fleet_size,
+                "inject_region": True,
+            }
+            r = requests.post(f"{ML_URL}/api/v1/ml/whatif", json=payload, timeout=30)
+            
+            if not r.ok:
+                st.error(f"ML Engine returned {r.status_code}: {r.text[:200]}")
+                st.stop()
+            
+            result = r.json()
+        except Exception as e:
+            st.error(f"Connection error: {e}")
+            st.stop()
     
     impact = result['impact_summary']
     
@@ -198,7 +207,6 @@ if st.button("🚀 Run Simulation", use_container_width=True, type="primary"):
     col_before, col_after = st.columns(2)
     
     details = result['shipment_details']
-    affected_shipments = [d for d in details if d['is_in_affected_region']]
     
     with col_before:
         st.markdown("### 🔵 Before Disruption")

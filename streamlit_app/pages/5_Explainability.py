@@ -1,16 +1,15 @@
 """
 Model Explainability Dashboard — Streamlit Page
 Transparent AI: see WHY the model predicts delays with feature contribution analysis.
+Now uses HTTP calls to the FastAPI backend instead of direct ML imports.
 """
 import streamlit as st
 import pandas as pd
 import numpy as np
-import sys
+import requests
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-
-from ml.explainability import DelayExplainer, ETAExplainer
+ML_URL = os.environ.get("ML_ENGINE_URL", "https://logitrackai.onrender.com")
 
 st.set_page_config(page_title="Explainability", page_icon="🧠", layout="wide")
 
@@ -77,18 +76,6 @@ st.markdown("""
     <p>Transparent AI — understand WHY our models predict delays and ETAs with per-feature contribution analysis</p>
 </div>
 """, unsafe_allow_html=True)
-
-# ── Initialize ──
-@st.cache_resource
-def get_delay_explainer():
-    return DelayExplainer()
-
-@st.cache_resource
-def get_eta_explainer():
-    return ETAExplainer()
-
-delay_exp = get_delay_explainer()
-eta_exp = get_eta_explainer()
 
 # ── Tab Selection ──
 tab1, tab2, tab3 = st.tabs(["🔮 Delay Risk Explainer", "⏱️ ETA Explainer", "📊 Global Feature Importance"])
@@ -160,7 +147,16 @@ with tab1:
         }
     
     if st.button("🔍 Explain Prediction", use_container_width=True, type="primary", key="delay_btn"):
-        result = delay_exp.explain(features)
+        with st.spinner("Analyzing with ML engine..."):
+            try:
+                r = requests.post(f"{ML_URL}/api/v1/ml/explain-delay", json=features, timeout=30)
+                if not r.ok:
+                    st.error(f"ML Engine returned {r.status_code}: {r.text[:200]}")
+                    st.stop()
+                result = r.json()
+            except Exception as e:
+                st.error(f"Connection error: {e}")
+                st.stop()
         
         if 'error' in result:
             st.error(result['error'])
@@ -242,22 +238,26 @@ with tab2:
         eta_speed = st.slider("Courier Avg Speed (km/min)", 0.01, 0.15, 0.05, 0.01, key="eta_speed")
     
     if st.button("⏱️ Predict ETA & Explain", use_container_width=True, type="primary", key="eta_btn"):
-        eta_features = {
-            'delivery_distance_km': eta_dist,
-            'log_distance': np.log1p(eta_dist),
-            'accept_hour': eta_hour,
-            'day_of_week': eta_dow,
-            'is_rush_hour': 1 if (8 <= eta_hour <= 10) or (17 <= eta_hour <= 19) else 0,
-            'is_weekend': 1 if eta_dow >= 5 else 0,
-            'courier_daily_packages': eta_pkgs,
-            'courier_avg_speed': eta_speed,
-            'distance_x_rush': eta_dist * (1 if (8 <= eta_hour <= 10) or (17 <= eta_hour <= 19) else 0),
-            'city': eta_city,
-            'time_period': 'morning' if 6<=eta_hour<12 else 'afternoon' if 12<=eta_hour<17 else 'evening' if 17<=eta_hour<21 else 'night',
-            'aoi_type': 'other',
+        eta_payload = {
+            "distance_km": eta_dist,
+            "hour": eta_hour,
+            "city": eta_city,
+            "day_of_week": eta_dow,
+            "courier_daily_packages": eta_pkgs,
+            "courier_avg_speed": eta_speed,
+            "aoi_type": "other",
         }
         
-        result = eta_exp.explain(eta_features)
+        with st.spinner("Querying ETA explainer..."):
+            try:
+                r = requests.post(f"{ML_URL}/api/v1/ml/explain-eta", json=eta_payload, timeout=30)
+                if not r.ok:
+                    st.error(f"ML Engine returned {r.status_code}: {r.text[:200]}")
+                    st.stop()
+                result = r.json()
+            except Exception as e:
+                st.error(f"Connection error: {e}")
+                st.stop()
         
         if 'error' in result:
             st.error(result['error'])
@@ -304,7 +304,14 @@ with tab3:
     st.markdown("### 🌍 Global Feature Importance — Delay Predictor")
     st.markdown("Which features matter most across ALL predictions, not just one shipment.")
     
-    global_imp = delay_exp.get_global_importance()
+    try:
+        r = requests.get(f"{ML_URL}/api/v1/ml/global-importance", timeout=30)
+        if r.ok:
+            global_imp = r.json().get("features", [])
+        else:
+            global_imp = []
+    except:
+        global_imp = []
     
     if global_imp:
         import plotly.express as px
@@ -331,7 +338,7 @@ with tab3:
         # Table
         st.dataframe(pd.DataFrame(global_imp), use_container_width=True, hide_index=True)
     else:
-        st.warning("Model not loaded — could not retrieve global importance.")
+        st.warning("Could not retrieve global importance — check backend connection.")
     
     st.markdown("---")
     st.markdown("""
