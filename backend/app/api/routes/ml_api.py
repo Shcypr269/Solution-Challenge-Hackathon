@@ -383,3 +383,226 @@ async def impact_metrics():
         "critical_alerts": summary.get("critical_alerts", 0),
         "high_alerts": summary.get("high_alerts", 0),
     }))
+
+
+# ══════════════════════════════════════════════════════════
+# ── Gemini-Powered Intelligent Chat ──
+# ══════════════════════════════════════════════════════════
+
+GEMINI_API_KEY = os.environ.get("GOOGLE_API_KEY", "AIzaSyDVU9Ir1x38mgVUs1rFNqnwxvGnvjc9vt8")
+
+SYSTEM_PROMPT = """You are LogiTrack AI, an expert supply chain logistics assistant.
+You help users analyze their supply chain using real ML models deployed on a production backend.
+
+You have access to these ML tools (call exactly ONE per user question):
+
+1. **predict_delay** — Predict if a shipment will be delayed and the probability.
+   Parameters: delivery_partner (delhivery|bluedart|shadowfax|xpressbees|dhl), package_type (electronics|perishable|fragile|clothing|machinery|chemicals|documents|food), vehicle_type (truck|bike|ev van|three wheeler), delivery_mode (standard|express), region (north|south|east|west|central), weather_condition (clear|rainy|stormy|foggy|extreme heat|cold), distance_km (number), package_weight_kg (number)
+
+2. **predict_eta** — Estimate delivery time in minutes.
+   Parameters: distance_km (number), hour (0-23), city (string), day_of_week (0-6, 0=Monday)
+
+3. **optimize_transport** — Find cheapest/greenest/fastest transport mode.
+   Parameters: distance_km (number), weight_kg (number), deadline_hours (number), priority (cost|speed|green|balanced)
+
+4. **whatif** — Simulate a supply chain disruption scenario.
+   Parameters: disruption_type (weather|port_congestion|highway_closure|strike), affected_region (north|south|east|west|central), severity (0.0-1.0), fleet_size (5-100)
+
+5. **explain_delay** — Explain WHY a shipment would be delayed using SHAP analysis.
+   Parameters: same as predict_delay
+
+6. **anomaly_scan** — Scan the fleet for anomalous shipments.
+   Parameters: none
+
+7. **auto_reroute** — Detect anomalies and auto-optimize critical shipments.
+   Parameters: none
+
+INSTRUCTIONS:
+- When the user asks a logistics question, determine which tool to call.
+- Fill in reasonable defaults for any parameters not mentioned by the user.
+- Use Indian cities to infer regions: Mumbai/Pune/Ahmedabad=west, Delhi/Jaipur/Lucknow=north, Bangalore/Chennai/Hyderabad=south, Kolkata/Patna=east, Bhopal=central.
+- Respond with ONLY a JSON object (no markdown, no explanation), like:
+  {"tool": "predict_delay", "params": {"delivery_partner": "delhivery", "distance_km": 1400, ...}}
+- If the user is just chatting or asking a general logistics question (not needing a tool), respond with:
+  {"tool": "none", "answer": "Your helpful answer here..."}
+- NEVER return anything except valid JSON.
+"""
+
+SUMMARY_PROMPT = """You are LogiTrack AI. The user asked: "{question}"
+
+The ML engine returned this data:
+{result}
+
+Write a clear, helpful, expert-level response for a logistics manager. Include:
+- A direct answer to their question
+- Key numbers and metrics from the data
+- Actionable advice based on the results
+- Use emojis sparingly for visual clarity
+- Keep it concise (3-5 sentences max)
+- If there are cost or time savings, highlight them
+- Format numbers nicely (₹ for Indian Rupees, km, kg, etc.)
+"""
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(description="User's natural language question")
+    conversation_history: Optional[List[dict]] = Field(default=[], description="Previous messages for context")
+
+
+@router.post("/chat")
+async def gemini_chat(req: ChatRequest):
+    """Gemini-powered intelligent chat that routes to real ML models."""
+    import google.generativeai as genai
+
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel("gemini-2.0-flash")
+
+    # Step 1: Ask Gemini to understand the question and pick a tool
+    try:
+        routing_response = model.generate_content(
+            SYSTEM_PROMPT + f"\n\nUser question: {req.message}"
+        )
+        raw_text = routing_response.text.strip()
+        # Clean markdown fences if Gemini wraps it
+        if raw_text.startswith("```"):
+            raw_text = raw_text.split("\n", 1)[1] if "\n" in raw_text else raw_text[3:]
+            if raw_text.endswith("```"):
+                raw_text = raw_text[:-3].strip()
+        routing = json.loads(raw_text)
+    except Exception as e:
+        return JSONResponse(content={
+            "response": f"I'd be happy to help with your logistics question! However, I had trouble understanding that. Could you rephrase? Try asking about delay predictions, transport modes, disruption scenarios, or fleet anomalies.\n\n(Debug: {str(e)[:100]})",
+            "tool_used": None,
+            "ml_data": None,
+        })
+
+    tool = routing.get("tool", "none")
+    params = routing.get("params", {})
+
+    # Step 2: If no tool needed, return Gemini's direct answer
+    if tool == "none":
+        return JSONResponse(content={
+            "response": routing.get("answer", "I'm LogiTrack AI — ask me about delay risks, ETAs, transport optimization, disruptions, or fleet health!"),
+            "tool_used": None,
+            "ml_data": None,
+        })
+
+    # Step 3: Call the real ML model
+    ml_result = None
+    tool_label = tool
+
+    try:
+        if tool == "predict_delay":
+            from ml.explainability import DelayExplainer
+            explainer = DelayExplainer()
+            ml_result = explainer.explain(params)
+            tool_label = "Delay Prediction + SHAP"
+
+        elif tool == "predict_eta":
+            import joblib
+            eta_model = joblib.load("models/eta_predictor_v2.joblib")
+            features = {
+                'delivery_distance_km': params.get('distance_km', 50),
+                'log_distance': float(np.log1p(params.get('distance_km', 50))),
+                'accept_hour': params.get('hour', 14),
+                'day_of_week': params.get('day_of_week', 3),
+                'is_rush_hour': 1 if params.get('hour', 14) in range(8, 11) or params.get('hour', 14) in range(17, 20) else 0,
+                'is_weekend': 1 if params.get('day_of_week', 3) >= 5 else 0,
+            }
+            import pandas as pd
+            df = pd.DataFrame([features])
+            for c in eta_model.feature_names_in_:
+                if c not in df.columns:
+                    df[c] = 0
+            df = df[eta_model.feature_names_in_]
+            pred = eta_model.predict(df)[0]
+            ml_result = {"estimated_time_mins": round(float(pred), 1), "city": params.get("city", "Unknown"), "distance_km": params.get("distance_km", 50)}
+            tool_label = "ETA Prediction"
+
+        elif tool == "optimize_transport":
+            from ml.multimodal_optimizer import optimize_transport
+            ml_result = optimize_transport(**params)
+            tool_label = "Transport Optimizer"
+
+        elif tool == "whatif":
+            from ml.whatif_simulator import WhatIfSimulator
+            sim = WhatIfSimulator()
+            fleet = sim.generate_sample_fleet(
+                params.get("fleet_size", 20),
+                inject_region=params.get("affected_region", "north")
+            )
+            ml_result = sim.simulate_disruption(
+                fleet=fleet,
+                disruption_type=params.get("disruption_type", "weather"),
+                affected_region=params.get("affected_region", "north"),
+                severity=params.get("severity", 0.7),
+            )
+            tool_label = "What-If Simulator"
+
+        elif tool == "explain_delay":
+            from ml.explainability import DelayExplainer
+            explainer = DelayExplainer()
+            ml_result = explainer.explain(params)
+            tool_label = "Explainability (SHAP)"
+
+        elif tool == "anomaly_scan":
+            from ml.anomaly_detector import SupplyChainAnomalyDetector
+            detector = SupplyChainAnomalyDetector(contamination=0.15)
+            detector.fit_on_csv()
+            fleet = _load_fleet()
+            scan = detector.detect_batch(fleet)
+            ml_result = {"summary": scan.get("summary", {}), "risk_distribution": scan.get("risk_distribution", {})}
+            tool_label = "Anomaly Detection"
+
+        elif tool == "auto_reroute":
+            # Reuse the auto-reroute logic
+            from ml.anomaly_detector import SupplyChainAnomalyDetector
+            from ml.multimodal_optimizer import optimize_transport as opt_transport
+            detector = SupplyChainAnomalyDetector(contamination=0.15)
+            detector.fit_on_csv()
+            fleet = _load_fleet()
+            scan = detector.detect_batch(fleet)
+            results = scan.get("results", [])
+            fleet_map = {s["shipment_id"]: s for s in fleet}
+            rerouted = []
+            for r in results:
+                if r.get("risk_level") in ("CRITICAL", "HIGH") and r.get("is_anomaly"):
+                    ship = fleet_map.get(r["shipment_id"], {})
+                    try:
+                        o = opt_transport(distance_km=ship.get("distance_km", 500), weight_kg=ship.get("package_weight_kg", 100), deadline_hours=48, priority="balanced")
+                        rerouted.append({"shipment_id": r["shipment_id"], "origin": ship.get("origin"), "destination": ship.get("destination"), "risk_level": r["risk_level"], "recommended_mode": o.get("recommended", {}).get("mode", "N/A"), "cost_saved": o.get("savings", {}).get("cost_saving_inr", 0)})
+                    except Exception:
+                        pass
+            ml_result = {"total_fleet": len(fleet), "anomalies": scan.get("summary", {}).get("anomalies_detected", 0), "auto_rerouted": len(rerouted), "rerouted_shipments": rerouted}
+            tool_label = "Auto-Reroute"
+
+        else:
+            ml_result = {"error": f"Unknown tool: {tool}"}
+            tool_label = "Unknown"
+
+    except Exception as e:
+        return JSONResponse(content={
+            "response": f"I understood your question and tried to run **{tool_label}**, but the ML engine encountered an error: {str(e)[:200]}. The engine may be warming up — try again in 30 seconds.",
+            "tool_used": tool_label,
+            "ml_data": None,
+        })
+
+    # Step 4: Ask Gemini to summarize the ML result in natural language
+    safe_result = _numpy_safe(ml_result) if ml_result else {}
+    try:
+        summary_response = model.generate_content(
+            SUMMARY_PROMPT.format(
+                question=req.message,
+                result=json.dumps(safe_result, indent=2, default=str)[:3000]
+            )
+        )
+        natural_response = summary_response.text.strip()
+    except Exception:
+        natural_response = f"Here are the results from {tool_label}:\n\n```json\n{json.dumps(safe_result, indent=2, default=str)[:1000]}\n```"
+
+    return JSONResponse(content=_numpy_safe({
+        "response": natural_response,
+        "tool_used": tool_label,
+        "params_extracted": params,
+        "ml_data": safe_result,
+    }))
