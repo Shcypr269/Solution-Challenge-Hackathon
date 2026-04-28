@@ -30,7 +30,6 @@ Respond with valid JSON only, no markdown formatting."""
 
         try:
             raw = await self._call_llm(prompt)
-            # Strip markdown code fences if Gemini wraps in them
             cleaned = raw.strip()
             if cleaned.startswith("```"):
                 cleaned = cleaned.split("\n", 1)[1]
@@ -50,7 +49,6 @@ Respond with valid JSON only, no markdown formatting."""
             return self._keyword_fallback(text)
     
     def _keyword_fallback(self, text: str) -> Dict[str, Any]:
-        """Fallback classifier using simple keyword matching when LLM is unavailable."""
         text_lower = text.lower()
         
         if any(w in text_lower for w in ["accident", "crash", "collision"]):
