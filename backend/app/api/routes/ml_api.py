@@ -389,7 +389,7 @@ async def impact_metrics():
 # ── Gemini-Powered Intelligent Chat ──
 # ══════════════════════════════════════════════════════════
 
-GEMINI_API_KEY = os.environ.get("GOOGLE_API_KEY", "AIzaSyDVU9Ir1x38mgVUs1rFNqnwxvGnvjc9vt8")
+GEMINI_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 
 SYSTEM_PROMPT = """You are LogiTrack AI, an expert supply chain logistics assistant.
 You help users analyze their supply chain using real ML models deployed on a production backend.
